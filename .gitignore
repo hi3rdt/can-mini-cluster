@@ -1,0 +1,11 @@
+build/
+stm32_cluster/build/
+test/build/
+esp32_vehicle_sim/build/
+esp32_vehicle_sim/sdkconfig
+esp32_vehicle_sim/sdkconfig.old
+esp32_vehicle_sim/managed_components/
+*.o
+*.su
+*.d
+__pycache__/

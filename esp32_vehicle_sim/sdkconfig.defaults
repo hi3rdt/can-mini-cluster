@@ -1,0 +1,7 @@
+# 1 kHz tick: ISO-TP timing and the 20 ms EngineData cycle need ms resolution
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+# keep TWAI ISR working while flash cache is disabled (e.g. during NVS writes)
+CONFIG_TWAI_ISR_IN_IRAM=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

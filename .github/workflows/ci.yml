@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check DBC vectors are up to date
+        run: |
+          pip install cantools
+          make -C test vectors
+          git diff --exit-code test/can_vectors.h
+      - name: Unit tests (ASan + UBSan)
+        run: make -C test
+
+  stm32-firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Build
+        run: make -C stm32_cluster -j4
+      - name: MISRA report
+        run: |
+          pip install cppcheck
+          make -C stm32_cluster misra
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stm32-firmware
+          path: |
+            stm32_cluster/build/cluster.elf
+            stm32_cluster/build/cluster.hex
+            stm32_cluster/build/cluster.map
+            stm32_cluster/build/misra.txt
+
+  esp32-firmware:
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v5.3.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd esp32_vehicle_sim
+          idf.py set-target esp32
+          idf.py build
