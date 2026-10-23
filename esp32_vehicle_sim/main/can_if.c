@@ -121,7 +121,12 @@ static void alert_task(void *arg)
 void can_if_init(void)
 {
     const twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(PIN_TWAI_TX, PIN_TWAI_RX, TWAI_MODE_NORMAL);
-    const twai_timing_config_t  t = TWAI_TIMING_CONFIG_500KBITS();
+    /* 10 MHz quanta, 1 + 16 + 3 = 20 tq -> 500 kbit/s, sample point 85 %. The IDF default
+     * macro samples at 80 %; this keeps both nodes close to the STM32's 83.3 %. */
+    const twai_timing_config_t  t = {
+        .clk_src = TWAI_CLK_SRC_DEFAULT, .quanta_resolution_hz = 10000000U, .brp = 0U,
+        .tseg_1 = 16U, .tseg_2 = 3U, .sjw = 2U, .triple_sampling = false,
+    };
     const twai_filter_config_t  f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
     ESP_ERROR_CHECK(twai_driver_install(&g, &t, &f));

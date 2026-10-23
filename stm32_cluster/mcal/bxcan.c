@@ -3,7 +3,8 @@
  * @brief   bxCAN driver (see bxcan.h).
  *
  * Bit timing: PCLK1 = 36 MHz, BRP = 4 -> tq = 111.1 ns, 18 tq/bit
- * (SYNC 1 + BS1 15 + BS2 2) = 500 kbit/s, sample point 16/18 = 88.9 %.
+ * (SYNC 1 + BS1 14 + BS2 3) = 500 kbit/s, sample point 15/18 = 83.3 %, SJW 2 tq.
+ * The ESP32 node samples at 85 % (20 tq); see esp32_vehicle_sim/main/can_if.c.
  *
  * Filter bank 0, 16-bit identifier-list mode, accepts exactly:
  * 0x100 EngineData, 0x200 BodyStatus, 0x7E0 diag physical, 0x7DF diag functional.
@@ -56,9 +57,9 @@ std_return_t can_init(can_mode_t mode)
     CAN1->MCR |= CAN_MCR_ABOM      /* leave bus-off automatically after 128 x 11 recessive bits */
                | CAN_MCR_TXFP;     /* transmit in request order, not by identifier */
 
-    CAN1->BTR = (0UL  << CAN_BTR_SJW_Pos)
-              | (1UL  << CAN_BTR_TS2_Pos)           /* BS2 = 2 tq  */
-              | (14UL << CAN_BTR_TS1_Pos)           /* BS1 = 15 tq */
+    CAN1->BTR = (1UL  << CAN_BTR_SJW_Pos)           /* SJW = 2 tq  */
+              | (2UL  << CAN_BTR_TS2_Pos)           /* BS2 = 3 tq  */
+              | (13UL << CAN_BTR_TS1_Pos)           /* BS1 = 14 tq */
               | (3UL  << CAN_BTR_BRP_Pos)           /* BRP = 4     */
               | ((mode == CAN_MODE_LOOPBACK_SILENT) ? (CAN_BTR_LBKM | CAN_BTR_SILM) : 0UL);
 
