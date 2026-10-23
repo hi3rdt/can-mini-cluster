@@ -15,9 +15,6 @@
 #define CANID_ENGINE_DATA       (0x100U)
 #define CANID_BODY_STATUS       (0x200U)
 #define CANID_CLUSTER_STATUS    (0x300U)
-#define CANID_DIAG_FUNC_REQ     (0x7DFU)
-#define CANID_DIAG_PHYS_REQ     (0x7E0U)
-#define CANID_DIAG_PHYS_RESP    (0x7E8U)
 
 /* ---- Timing ------------------------------------------------------------ */
 #define CYCLE_ENGINE_DATA_MS    (20U)
@@ -50,7 +47,6 @@
 #define WARN_LOW_FUEL           (1U << 2)
 #define WARN_ENGINE_LOST        (1U << 3)
 #define WARN_BODY_LOST          (1U << 4)
-#define WARN_SPEED_DEGRADED     (1U << 5)   /* showing wheel-pulse speed  */
 
 /* ---- Message structures (raw values) ----------------------------------- */
 typedef struct
@@ -78,7 +74,7 @@ typedef struct
     uint8_t  fuel_level_pct;        /* 0..100 %                           */
     uint32_t odometer_raw;          /* 0.1 km/bit, 24 bit                 */
     uint8_t  warning_bits;
-    uint8_t  dtc_count;
+    uint8_t  dtc_count;             /* reserved for diagnostics, sent as 0 */
     uint8_t  alive;
     uint8_t  crc;
 } msg_cluster_status_t;

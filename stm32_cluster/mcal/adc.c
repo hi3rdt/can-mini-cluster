@@ -1,10 +1,10 @@
 /**
  * @file    adc.c
- * @brief   ADC1 scan + DMA circular (see adc.h).
+ * @brief   ADC1 polled driver (see adc.h).
  *
- * ADCCLK = 12 MHz, sample time 239.5 cycles (the temperature sensor needs >= 17.1 us),
- * conversion = 239.5 + 12.5 = 252 cycles = 21 us per channel. The DMA keeps
- * s_samples[] refreshed every 42 us with zero interrupts.
+ * ADCCLK = PCLK2 / 6 = 12 MHz (max 14 MHz, prescaler set in rcc.c). Sample time 239.5 cycles gives the
+ * potentiometer's high source impedance time to charge the sample capacitor:
+ * conversion = 239.5 + 12.5 = 252 cycles = 21 us.
  */
 #include "adc.h"
 #include "gpio.h"
@@ -13,21 +13,14 @@
 
 #define ADC_SMP_239_5       (7UL)
 #define ADC_EXTSEL_SWSTART  (7UL)
-#define ADC_CAL_TIMEOUT_MS  (5UL)
+#define ADC_TIMEOUT_MS      (5UL)
 
-/* DS5319: V25 = 1.43 V typ., avg slope = 4.3 mV/degC */
-#define TEMP_V25_MV         (1430L)
-#define TEMP_SLOPE_UV_PER_C (4300L)
-#define VDDA_MV             (3300L)
-
-static volatile uint16_t s_samples[ADC_CH_COUNT];
-
-static bool wait_clear(volatile const uint32_t *reg, uint32_t mask)
+static bool wait_flag(volatile const uint32_t *reg, uint32_t mask, bool set)
 {
     const uint32_t t0 = tick_get();
-    while ((*reg & mask) != 0UL)
+    while (((*reg & mask) != 0UL) != set)
     {
-        if (tick_elapsed(t0, ADC_CAL_TIMEOUT_MS))
+        if (tick_elapsed(t0, ADC_TIMEOUT_MS))
         {
             return false;
         }
@@ -38,45 +31,30 @@ static bool wait_clear(volatile const uint32_t *reg, uint32_t mask)
 std_return_t adc_init(void)
 {
     RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
-    RCC->AHBENR  |= RCC_AHBENR_DMA1EN;
     gpio_config(GPIOA, 0U, GPIO_IN_ANALOG);
 
-    /* Power up, wait tSTAB (1 us) - two SysTicks is plenty - then calibrate */
+    /* Power up, wait tSTAB (1 us; two SysTicks is plenty), then self-calibrate */
     ADC1->CR2 = ADC_CR2_ADON;
     tick_delay_ms(2UL);
     ADC1->CR2 |= ADC_CR2_RSTCAL;
-    if (!wait_clear(&ADC1->CR2, ADC_CR2_RSTCAL)) { return E_TIMEOUT; }
+    if (!wait_flag(&ADC1->CR2, ADC_CR2_RSTCAL, false)) { return E_TIMEOUT; }
     ADC1->CR2 |= ADC_CR2_CAL;
-    if (!wait_clear(&ADC1->CR2, ADC_CR2_CAL))    { return E_TIMEOUT; }
+    if (!wait_flag(&ADC1->CR2, ADC_CR2_CAL, false))    { return E_TIMEOUT; }
 
     ADC1->SMPR2 = ADC_SMP_239_5 << ADC_SMPR2_SMP0_Pos;
-    ADC1->SMPR1 = ADC_SMP_239_5 << ADC_SMPR1_SMP16_Pos;
-    ADC1->SQR1  = (uint32_t)(ADC_CH_COUNT - 1U) << ADC_SQR1_L_Pos;   /* 2 conversions */
-    ADC1->SQR3  = (0UL << ADC_SQR3_SQ1_Pos) | (16UL << ADC_SQR3_SQ2_Pos);
-    ADC1->CR1   = ADC_CR1_SCAN;
-
-    DMA1_Channel1->CCR   = 0UL;
-    DMA1_Channel1->CPAR  = (uint32_t)&ADC1->DR;
-    DMA1_Channel1->CMAR  = (uint32_t)&s_samples[0];
-    DMA1_Channel1->CNDTR = ADC_CH_COUNT;
-    DMA1_Channel1->CCR   = DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 |
-                           DMA_CCR_PL_0 | DMA_CCR_EN;          /* 16/16 bit, medium priority */
-
-    ADC1->CR2 = ADC_CR2_ADON | ADC_CR2_CONT | ADC_CR2_DMA | ADC_CR2_TSVREFE |
-                (ADC_EXTSEL_SWSTART << ADC_CR2_EXTSEL_Pos) | ADC_CR2_EXTTRIG;
-    ADC1->CR2 |= ADC_CR2_SWSTART;
+    ADC1->SQR1  = 0UL;                              /* 1 conversion in the sequence */
+    ADC1->SQR3  = 0UL;                              /* SQ1 = channel 0              */
+    /* Software trigger: EXTSEL = SWSTART and EXTTRIG must be set, then SWSTART starts */
+    ADC1->CR2   = ADC_CR2_ADON | (ADC_EXTSEL_SWSTART << ADC_CR2_EXTSEL_Pos) | ADC_CR2_EXTTRIG;
     return E_OK;
 }
 
-uint16_t adc_raw(adc_ch_t ch)
+uint16_t adc_read_fuel(void)
 {
-    return (ch < ADC_CH_COUNT) ? s_samples[ch] : 0U;   /* 16-bit load is atomic */
-}
-
-int16_t adc_mcu_temp_x10(void)
-{
-    const int32_t mv = ((int32_t)adc_raw(ADC_CH_TEMP) * VDDA_MV) / 4095L;
-    /* T = (V25 - V) / slope + 25, computed in 0.1 degC with integer math */
-    const int32_t t_x10 = (((TEMP_V25_MV - mv) * 10000L) / TEMP_SLOPE_UV_PER_C) + 250L;
-    return (int16_t)t_x10;
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    if (!wait_flag(&ADC1->SR, ADC_SR_EOC, true))
+    {
+        return 0U;                                  /* treated as empty tank */
+    }
+    return (uint16_t)(ADC1->DR & 0x0FFFUL);         /* reading DR clears EOC */
 }

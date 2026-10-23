@@ -1,13 +1,11 @@
 /*
  * Linker script for STM32F103C8T6 (64 KB Flash, 20 KB SRAM).
- * The last 1 KB Flash page (0x0800FC00) is reserved for the NVM record store.
  */
 ENTRY(Reset_Handler)
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 63K
-    NVM   (r)   : ORIGIN = 0x0800FC00, LENGTH = 1K
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 64K
     RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 20K
 }
 
@@ -58,7 +56,8 @@ SECTIONS
         _ebss = .;
     } > RAM
 
-    /* No heap: malloc is not used (MISRA C:2012 Rule 21.3) */
+    /* No heap: malloc is not used. This empty section makes the link fail if
+       .data + .bss leave less than 2 KB for the stack. */
     ._stack_check (NOLOAD) :
     {
         . = ALIGN(8);

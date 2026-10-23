@@ -2,11 +2,13 @@
  * @file    main.c
  * @brief   CAN mini instrument cluster ECU - STM32F103C8T6, bare-metal (no HAL/LL).
  *
- * Task set (cooperative, time-triggered):
- *   1 ms   : COM RX dispatch, ISO-TP/UDS timing, CLI
- *   10 ms  : deadline monitoring + DEM, buttons
- *   20 ms  : cluster logic + dashboard partial redraw (50 Hz)
- *   100 ms : ClusterStatus TX, DTC persistence, heartbeat LED, watchdog supervision
+ * Super loop with fixed time slots, all driven by the 1 ms SysTick counter:
+ *   every pass : drain the CAN RX queue (frames are queued by the RX0 ISR)
+ *   10 ms      : message timeout monitoring
+ *   20 ms      : cluster logic + dashboard partial redraw (50 Hz)
+ *   100 ms     : ClusterStatus TX, heartbeat LED
+ *   1000 ms    : status line on the debug UART
+ * The watchdog is refreshed once per pass, so a hang anywhere resets the MCU.
  */
 #include "board.h"
 #include "rcc.h"
@@ -14,89 +16,39 @@
 #include "systick.h"
 #include "uart.h"
 #include "adc.h"
-#include "tim.h"
 #include "spi.h"
 #include "bxcan.h"
-#include "fault.h"
+#include "iwdg.h"
 #include "ili9341.h"
-#include "buttons.h"
-#include "speed_sensor.h"
-#include "nvm.h"
-#include "dem.h"
 #include "com.h"
-#include "diag.h"
-#include "sched.h"
-#include "wdg_m.h"
 #include "log.h"
 #include "cluster.h"
 #include "dashboard.h"
-#include "cli.h"
-#include "app_info.h"
-
-#define ALIVE_1MS       (1UL << 0)
-#define ALIVE_10MS      (1UL << 1)
-#define ALIVE_20MS      (1UL << 2)
-#define ALIVE_100MS     (1UL << 3)
-#define ALIVE_ALL       (ALIVE_1MS | ALIVE_10MS | ALIVE_20MS | ALIVE_100MS)
 
 #define NVIC_GROUP_4_PREEMPT_BITS   (3U)    /* PRIGROUP=3: 4 bits pre-emption, 0 sub */
 
-static void task_1ms(uint32_t now)
+typedef struct
 {
-    com_main_1ms(now);
-    diag_main_1ms(now);
-    cli_poll(now);
-    wdg_m_checkpoint(ALIVE_1MS);
-}
+    uint32_t period_ms;
+    uint32_t next_ms;   /* release time of the next run */
+} slot_t;
 
-static void task_10ms(uint32_t now)
+/* True when the slot is due; the next release is planned from the previous one,
+   not from 'now', so the period does not drift when a pass runs late. */
+static bool slot_due(slot_t *s, uint32_t now)
 {
-    com_main_10ms(now);
-    if (buttons_take_press(BTN_MENU))
+    if ((int32_t)(now - s->next_ms) < 0)
     {
-        dashboard_next_info_page();
+        return false;
     }
-    if (buttons_take_press(BTN_TRIP))
-    {
-        cluster_reset_trip();
-    }
-    wdg_m_checkpoint(ALIVE_10MS);
+    s->next_ms += s->period_ms;
+    return true;
 }
-
-static void task_20ms(uint32_t now)
-{
-    cluster_main_20ms(now);
-    dashboard_update(cluster_state(), now);
-    wdg_m_checkpoint(ALIVE_20MS);
-}
-
-static void task_100ms(uint32_t now)
-{
-    static uint8_t s_hb;
-
-    cluster_main_100ms(now);
-    dem_main_100ms();
-    s_hb++;
-    if ((s_hb % 5U) == 0U)
-    {
-        gpio_toggle(LED_PORT, LED_PIN);     /* 1 Hz heartbeat: scheduler alive */
-    }
-    wdg_m_checkpoint(ALIVE_100MS);
-    wdg_m_main_100ms();
-}
-
-static sched_task_t s_tasks[] = {
-    { "1ms",   task_1ms,   1U,   0U, 0U, 0U, 0U, 0U, 0U },
-    { "10ms",  task_10ms,  10U,  1U, 0U, 0U, 0U, 0U, 0U },
-    { "20ms",  task_20ms,  20U,  3U, 0U, 0U, 0U, 0U, 0U },
-    { "100ms", task_100ms, 100U, 7U, 0U, 0U, 0U, 0U, 0U },
-};
-
-static const uds_cfg_t s_uds_cfg = { app_read_did, NVIC_SystemReset };
 
 static void fatal_clock_failure(void)
 {
-    /* No reliable clock: no CAN, no UART timing. Fast LED blink, wait for power cycle. */
+    /* No crystal: CAN bit timing would be wrong, so do not join the bus at all.
+       Fast LED blink until power cycle. */
     gpio_clock_enable_all();
     gpio_config(LED_PORT, LED_PIN, GPIO_OUT_PP_2MHZ);
     for (;;)
@@ -104,6 +56,24 @@ static void fatal_clock_failure(void)
         gpio_toggle(LED_PORT, LED_PIN);
         for (volatile uint32_t i = 0UL; i < 100000UL; i++) { }
     }
+}
+
+static void log_status(void)
+{
+    com_stats_t cs;
+    can_stats_t bs;
+    const cluster_state_t *st = cluster_state();
+
+    com_get_stats(&cs);
+    can_get_stats(&bs);
+    log_printf("t=%lus spd=%u rpm=%u fuel=%u%% eng=%s body=%s | rx %lu/%lu crc_err %lu seq_err %lu "
+               "timeouts %lu/%lu | TEC %u REC %u busoff %lu\r\n",
+               (unsigned long)(tick_get() / 1000UL), (unsigned)st->speed_kmh, (unsigned)st->rpm,
+               (unsigned)st->fuel_pct, st->engine_valid ? "ok" : "LOST", st->body_valid ? "ok" : "LOST",
+               (unsigned long)cs.engine_rx, (unsigned long)cs.body_rx,
+               (unsigned long)cs.e2e_crc_errors, (unsigned long)cs.e2e_seq_errors,
+               (unsigned long)cs.engine_timeouts, (unsigned long)cs.body_timeouts,
+               (unsigned)bs.tec, (unsigned)bs.rec, (unsigned long)bs.bus_off_events);
 }
 
 int main(void)
@@ -115,32 +85,20 @@ int main(void)
     NVIC_SetPriorityGrouping(NVIC_GROUP_4_PREEMPT_BITS);
     gpio_clock_enable_all();
     gpio_config(LED_PORT, LED_PIN, GPIO_OUT_PP_2MHZ);
-    gpio_set(LED_PORT, LED_PIN);            /* LED off (active low) */
+    gpio_set(LED_PORT, LED_PIN);                    /* LED off (active low) */
     systick_init(HCLK_HZ);
 
     uart_init(PCLK2_HZ, UART_BAUD);
-    fault_enable_traps();
     const reset_cause_t rc = rcc_reset_cause();
-    app_info_init(rc);
-    log_printf("\r\nreset cause: %s\r\n", rcc_reset_cause_str(rc));
-
-    (void)nvm_init();
-    dem_init();
-    if (rc == RESET_CAUSE_IWDG)
-    {
-        dem_report(DEM_EVT_WDG_RESET, true);    /* confirmed, persisted by dem_main_100ms */
-        dem_report(DEM_EVT_WDG_RESET, false);
-    }
+    log_printf("\r\nCAN mini cluster %s, reset cause: %s\r\n", FW_VERSION_STR, rcc_reset_cause_str(rc));
 
     if (adc_init() != E_OK)
     {
         log_printf("ADC calibration timeout\r\n");
     }
-    tim_backlight_init();
-    tim_buzzer_init(2700UL);                /* typical piezo resonance */
-    speed_sensor_init();
-    buttons_init();
 
+    gpio_config(TFT_BL_PORT, TFT_BL_PIN, GPIO_OUT_PP_2MHZ);
+    gpio_set(TFT_BL_PORT, TFT_BL_PIN);              /* backlight on */
     spi_init();
     ili9341_init();
     dashboard_init();
@@ -150,12 +108,45 @@ int main(void)
         log_printf("CAN init timeout: check transceiver and wiring (RX must idle high)\r\n");
     }
     com_init(tick_get());
-    diag_init(&s_uds_cfg);
     cluster_init();
-    cli_init();
 
-    sched_init(s_tasks, (uint8_t)ARRAY_LEN(s_tasks));
-    wdg_m_init(ALIVE_ALL);
-    sched_run();
-    return 0;
+    /* Started last: the display init above takes longer than the watchdog timeout */
+    iwdg_start(WATCHDOG_TIMEOUT_MS);
+
+    const uint32_t t0 = tick_get();
+    slot_t s10   = { 10UL,   t0 + 1UL };            /* offsets: slots never all fall due */
+    slot_t s20   = { 20UL,   t0 + 3UL };            /* in the same pass                  */
+    slot_t s100  = { 100UL,  t0 + 7UL };
+    slot_t s1000 = { 1000UL, t0 + 500UL };
+    uint8_t hb = 0U;
+
+    for (;;)
+    {
+        const uint32_t now = tick_get();
+
+        com_poll_rx(now);
+        if (slot_due(&s10, now))
+        {
+            com_check_timeouts(now);
+        }
+        if (slot_due(&s20, now))
+        {
+            cluster_update_20ms();
+            dashboard_update(cluster_state(), now);
+        }
+        if (slot_due(&s100, now))
+        {
+            cluster_send_status_100ms();
+            hb++;
+            if ((hb % 5U) == 0U)
+            {
+                gpio_toggle(LED_PORT, LED_PIN);     /* 1 Hz heartbeat */
+            }
+        }
+        if (slot_due(&s1000, now))
+        {
+            log_status();
+        }
+        iwdg_refresh();
+    }
 }

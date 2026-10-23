@@ -6,7 +6,6 @@
 #include "app_config.h"
 #include "can_if.h"
 #include "sim.h"
-#include "tester.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -24,40 +23,8 @@ static void help(void)
     printf(
         "vehicle:  mode sweep|manual   speed <kmh>   rpm <n>   temp <degC>\n"
         "          turn l|r|off   beam 0|1   door 0|1   belt 0|1\n"
-        "faults:   mute engine|body|none   crc on|off   pulse on|off   pulse_offset <kmh>\n"
-        "diag:     uds <hex bytes>   vin   ver   dtc   ext   clear   reset   tp on|off\n"
+        "faults:   mute engine|body|none   crc on|off\n"
         "misc:     log on|off (candump)   status   help\n");
-}
-
-static bool parse_hex(char *args, uint8_t *out, uint16_t *len)
-{
-    uint16_t n = 0U;
-    for (char *tok = strtok(args, " "); tok != NULL; tok = strtok(NULL, " "))
-    {
-        char *end;
-        const unsigned long v = strtoul(tok, &end, 16);
-        if ((*end != '\0') || (v > 0xFFUL) || (n >= TESTER_MAX_REQ))
-        {
-            return false;
-        }
-        out[n++] = (uint8_t)v;
-    }
-    *len = n;
-    return n > 0U;
-}
-
-static void send_uds(const uint8_t *req, uint16_t len)
-{
-    printf("UDS -> ");
-    for (uint16_t i = 0; i < len; i++)
-    {
-        printf("%02X ", req[i]);
-    }
-    printf("\n");
-    if (!tester_request(req, len))
-    {
-        printf("tester busy\n");
-    }
 }
 
 static bool on_off(const char *a)
@@ -92,24 +59,8 @@ static void execute(char *line)
         c->mute_body   = (strcmp(arg, "body") == 0);
     }
     else if (strcmp(cmd, "crc") == 0)          { c->corrupt_crc = on_off(arg); }
-    else if (strcmp(cmd, "pulse") == 0)        { c->pulse_enabled = on_off(arg); }
-    else if (strcmp(cmd, "pulse_offset") == 0 && arg) { c->pulse_offset_kmh = strtof(arg, NULL); }
     else if (strcmp(cmd, "log") == 0)          { can_if_set_logging(on_off(arg)); }
     else if (strcmp(cmd, "status") == 0)       { can_if_print_status(); }
-    else if (strcmp(cmd, "tp") == 0)           { tester_keepalive(on_off(arg)); }
-    else if (strcmp(cmd, "uds") == 0 && arg)
-    {
-        uint8_t req[TESTER_MAX_REQ];
-        uint16_t len;
-        if (parse_hex(arg, req, &len)) { send_uds(req, len); }
-        else                           { printf("usage: uds 22 F1 90\n"); }
-    }
-    else if (strcmp(cmd, "vin") == 0)   { const uint8_t r[] = { 0x22, 0xF1, 0x90 }; send_uds(r, sizeof(r)); }
-    else if (strcmp(cmd, "ver") == 0)   { const uint8_t r[] = { 0x22, 0xF1, 0x95 }; send_uds(r, sizeof(r)); }
-    else if (strcmp(cmd, "dtc") == 0)   { const uint8_t r[] = { 0x19, 0x02, 0xFF }; send_uds(r, sizeof(r)); }
-    else if (strcmp(cmd, "ext") == 0)   { const uint8_t r[] = { 0x10, 0x03 };       send_uds(r, sizeof(r)); }
-    else if (strcmp(cmd, "clear") == 0) { const uint8_t r[] = { 0x14, 0xFF, 0xFF, 0xFF }; send_uds(r, sizeof(r)); }
-    else if (strcmp(cmd, "reset") == 0) { const uint8_t r[] = { 0x11, 0x01 };       send_uds(r, sizeof(r)); }
     else                                { printf("unknown command, try 'help'\n"); }
 }
 

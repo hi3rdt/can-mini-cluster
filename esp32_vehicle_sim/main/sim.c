@@ -9,7 +9,6 @@
 #include "e2e.h"
 
 #include <math.h>
-#include "driver/ledc.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,16 +19,12 @@ static const char *TAG = "sim";
 #define SWEEP_TOP_KMH       (140.0f)
 #define IDLE_RPM            (800.0f)
 #define RPM_PER_KMH         (38.0f)
-#define LEDC_RES            LEDC_TIMER_10_BIT
-#define LEDC_DUTY_50        (512U)
 
 static sim_cfg_t s_cfg = {
     .mode = SIM_MODE_SWEEP, .speed_kmh = 0.0f, .rpm = IDLE_RPM, .coolant_c = 20.0f,
-    .pulse_enabled = true,
 };
 static uint8_t  s_engine_alive;
 static uint8_t  s_body_alive;
-static uint32_t s_last_pulse_hz;
 
 sim_cfg_t *sim_cfg(void)
 {
@@ -58,29 +53,6 @@ static void sweep_step(float t_s)
     s_cfg.high_beam       = (slot == 4U);
     s_cfg.belt_unfastened = (slot == 5U);
     s_cfg.door_open       = (slot == 0U) && (s_cfg.speed_kmh < 5.0f);
-}
-
-static void update_pulse(void)
-{
-    const float v = s_cfg.speed_kmh + s_cfg.pulse_offset_kmh;
-    const uint32_t hz = (s_cfg.pulse_enabled && (v >= 1.0f))
-                      ? (uint32_t)lroundf(v * (float)SPEED_PULSE_HZ_PER_KMH) : 0U;
-
-    if (hz == s_last_pulse_hz)
-    {
-        return;
-    }
-    if (hz == 0U)
-    {
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
-    }
-    else
-    {
-        ledc_set_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_0, hz);
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, LEDC_DUTY_50);
-    }
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-    s_last_pulse_hz = hz;
 }
 
 static void send_engine(void)
@@ -143,30 +115,11 @@ static void sim_task(void *arg)
         {
             send_body();
         }
-        update_pulse();
     }
 }
 
 void sim_init(void)
 {
-    const ledc_timer_config_t t = {
-        .speed_mode      = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_RES,
-        .timer_num       = LEDC_TIMER_0,
-        .freq_hz         = 100,
-        .clk_cfg         = LEDC_USE_REF_TICK,   /* 1 MHz: allows ~1..976 Hz at 10 bit */
-    };
-    ESP_ERROR_CHECK(ledc_timer_config(&t));
-    const ledc_channel_config_t c = {
-        .gpio_num   = PIN_SPEED_PULSE,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel    = LEDC_CHANNEL_0,
-        .timer_sel  = LEDC_TIMER_0,
-        .duty       = 0,
-        .hpoint     = 0,
-    };
-    ESP_ERROR_CHECK(ledc_channel_config(&c));
-
     xTaskCreate(sim_task, "sim", 4096, NULL, TASK_PRIO_SIM, NULL);
     ESP_LOGI(TAG, "vehicle simulator running (mode: sweep)");
 }

@@ -2,16 +2,15 @@
  * @file    startup_stm32f103.c
  * @brief   Vector table and reset handler for STM32F103x8/xB (medium density), written in C.
  *
- * Reset_Handler: copy .data from Flash, zero .bss, paint the free RAM between
- * .bss and the stack with a pattern (stack high-water mark), then call main().
+ * Reset_Handler: copy .data from Flash to RAM, zero .bss, then call main().
+ * Unused interrupt handlers are weak aliases of Default_Handler, so a driver
+ * overrides one just by defining a function with the same name.
  */
 #include <stdint.h>
 #include "stm32f1xx.h"
 
 extern uint32_t _sidata, _sdata, _edata, _sbss, _ebss, _estack;
 extern int main(void);
-
-#define STACK_PAINT_PATTERN   (0xA5A5A5A5UL)
 
 void Reset_Handler(void);
 void Default_Handler(void);
@@ -96,13 +95,6 @@ void Reset_Handler(void)
     for (dst = &_sbss; dst < &_ebss; dst++)
     {
         *dst = 0UL;
-    }
-
-    /* Paint up to 64 bytes below the current SP (Reset_Handler's own frame is tiny) */
-    const uint32_t sp = __get_MSP();
-    for (dst = &_ebss; (uint32_t)dst < (sp - 64UL); dst++)
-    {
-        *dst = STACK_PAINT_PATTERN;
     }
 
     (void)main();

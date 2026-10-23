@@ -4,7 +4,7 @@
  *
  * Supported: %d %u %x %X %s %c %% with optional '0' flag and width, and 'l' (ignored,
  * int and long are both 32 bit on Cortex-M3).
- * MISRA C:2012 Rule 17.1 (stdarg) deviation: see docs/misra_deviations.md.
+ * Uses stdarg.h; every call site is type-checked through the format attribute.
  */
 #ifndef LOG_H
 #define LOG_H

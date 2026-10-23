@@ -1,6 +1,6 @@
 /**
  * @file    console.h
- * @brief   UART0 command console for the simulator and tester (type "help").
+ * @brief   UART0 command console for the simulator (type "help").
  */
 #ifndef CONSOLE_H
 #define CONSOLE_H

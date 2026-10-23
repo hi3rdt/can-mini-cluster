@@ -41,7 +41,7 @@ std_return_t can_init(can_mode_t mode);
 std_return_t can_send(uint32_t id, const uint8_t *data, uint8_t dlc);
 bool         can_receive(can_frame_t *f);            /* main context, false if empty */
 void         can_get_stats(can_stats_t *out);
-/** True once after each bus-off entry (consumed by the caller, used for DTC reporting). */
+/** True once after each bus-off entry (consumed by the caller). */
 bool         can_take_busoff_event(void);
 
 #endif /* BXCAN_H */

@@ -49,8 +49,6 @@ std_return_t rcc_init_72mhz(void)
     {
         return E_NOT_OK;
     }
-
-    RCC->CR |= RCC_CR_CSSON;        /* clock security system: HSE failure -> NMI */
     return E_OK;
 }
 

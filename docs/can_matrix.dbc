@@ -4,7 +4,7 @@ NS_ :
 
 BS_:
 
-BU_: VehicleSim Cluster Tester
+BU_: VehicleSim Cluster
 
 BO_ 256 EngineData: 8 VehicleSim
  SG_ EngineSpeed : 0|16@1+ (0.25,0) [0|16383.75] "rpm" Cluster
@@ -30,18 +30,10 @@ BO_ 768 ClusterStatus: 8 Cluster
  SG_ ClusterStatus_Alive : 48|4@1+ (1,0) [0|15] "" VehicleSim
  SG_ ClusterStatus_CRC : 56|8@1+ (1,0) [0|255] "" VehicleSim
 
-BO_ 2015 DiagFunctionalReq: 8 Tester
- SG_ DiagFuncData : 0|64@1+ (1,0) [0|0] "" Cluster
-
-BO_ 2016 DiagPhysicalReq: 8 Tester
- SG_ DiagPhysData : 0|64@1+ (1,0) [0|0] "" Cluster
-
-BO_ 2024 DiagPhysicalResp: 8 Cluster
- SG_ DiagRespData : 0|64@1+ (1,0) [0|0] "" Tester
-
 CM_ BO_ 256 "Engine data, cycle 20 ms, byte 6 reserved (0xFF), E2E CRC8 J1850 over DataID+bytes 0..6";
 CM_ BO_ 512 "Body status, cycle 100 ms, E2E CRC8 J1850 over DataID+bytes 0..2";
 CM_ BO_ 768 "Cluster status, cycle 100 ms, E2E CRC8 J1850 over DataID+bytes 0..6";
+CM_ SG_ 768 DtcCount "Reserved for diagnostics, always 0";
 BA_DEF_ BO_ "GenMsgCycleTime" INT 0 10000;
 BA_DEF_DEF_ "GenMsgCycleTime" 0;
 BA_ "GenMsgCycleTime" BO_ 256 20;

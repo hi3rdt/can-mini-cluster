@@ -4,7 +4,6 @@
  */
 #include "can_if.h"
 #include "app_config.h"
-#include "tester.h"
 #include "e2e.h"
 
 #include <inttypes.h>
@@ -84,7 +83,6 @@ static void rx_task(void *arg)
         switch (m.identifier)
         {
         case CANID_CLUSTER_STATUS:  on_cluster_status(&m);                              break;
-        case CANID_DIAG_PHYS_RESP:  tester_on_can_rx(m.data, m.data_length_code);       break;
         default:                                                                         break;
         }
     }
@@ -183,9 +181,9 @@ void can_if_print_status(void)
     }
     if (can_if_get_cluster_status(&cs))
     {
-        printf("Cluster: fuel %u%%  odo %" PRIu32 ".%" PRIu32 " km  warn 0x%02X  DTCs %u  (E2E errors %" PRIu32 ")\n",
+        printf("Cluster: fuel %u%%  odo %" PRIu32 ".%" PRIu32 " km  warn 0x%02X  (E2E errors %" PRIu32 ")\n",
                cs.fuel_level_pct, cs.odometer_raw / 10U, cs.odometer_raw % 10U,
-               cs.warning_bits, cs.dtc_count, s_cluster_e2e_errors);
+               cs.warning_bits, s_cluster_e2e_errors);
     }
     else
     {

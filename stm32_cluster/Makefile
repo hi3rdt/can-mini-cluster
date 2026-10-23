@@ -1,8 +1,8 @@
 # STM32F103C8T6 cluster ECU - bare-metal build (arm-none-eabi-gcc, no HAL/LL)
 #   make            build build/cluster.elf/.bin/.hex
 #   make flash      program via ST-Link + OpenOCD
-#   make size       section sizes against the 63 KB / 20 KB budget
-#   make misra      cppcheck MISRA C:2012 addon report
+#   make size       section sizes against the 64 KB / 20 KB budget
+#   make check      cppcheck static analysis
 #   make clean
 
 TARGET  := cluster
@@ -31,7 +31,7 @@ LDFLAGS  := $(CPU) -T linker/stm32f103c8.ld -nostartfiles \
             --specs=nano.specs --specs=nosys.specs \
             -Wl,--gc-sections -Wl,-Map=$(BUILD)/$(TARGET).map -Wl,--print-memory-usage
 
-.PHONY: all flash size misra clean
+.PHONY: all flash size check clean
 
 all: $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).bin $(BUILD)/$(TARGET).hex
 
@@ -63,12 +63,10 @@ flash: $(BUILD)/$(TARGET).elf
 size: $(BUILD)/$(TARGET).elf
 	$(SIZE) -A $< | grep -E "isr_vector|text|data|bss|stack"
 
-misra:
-	cppcheck --addon=misra --std=c11 --enable=warning,style,performance,portability \
-	         --inline-suppr --suppress=missingIncludeSystem -DSTM32F103xB -D__GNUC__=13 \
-	         -Iconfig -Icmsis/core -Icmsis/device -Imcal -Iecual -Iservices -Igfx -Iapp -I../common/inc \
-	         $(filter-out startup/%,$(SRCS)) 2> $(BUILD)/misra.txt || true
-	@echo "MISRA report: $(BUILD)/misra.txt ($$(grep -c 'misra-c2012' $(BUILD)/misra.txt) findings)"
+check:
+	cppcheck --std=c11 --enable=warning,style,performance,portability --error-exitcode=1 \
+	         --inline-suppr --suppress=missingIncludeSystem "--suppress=*:cmsis/*" -DSTM32F103xB -D__GNUC__=13 -D__ARM_ARCH_PROFILE=77 -D__ARM_ARCH_7M__=1 \
+	         $(INCLUDES) $(filter-out startup/%,$(SRCS))
 
 clean:
 	rm -rf $(BUILD)

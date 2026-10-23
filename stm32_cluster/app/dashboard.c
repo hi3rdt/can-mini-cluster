@@ -8,8 +8,8 @@
  *   y 112..127  RPM bar      0..8000 rpm
  *   y 140..155  TEMP bar    40..130 degC
  *   y 168..183  FUEL bar     0..100 %
- *   y 200..215  info line (MENU button cycles ODO / TRIP / CAN / SYSTEM)
- *   y 228..235  link status line
+ *   y 200..215  odometer
+ *   y 228..235  link status line: ENGINE/BODY OK or LOST, CAN error counters
  *
  * Every widget caches what it last drew; nothing is redrawn unless its value or
  * colour changed. A full-screen repaint (~34 ms of SPI time) happens only at init.
@@ -19,7 +19,6 @@
 #include "ili9341.h"
 #include "log.h"
 #include "bxcan.h"
-#include "sched.h"
 #include "can_matrix.h"
 #include <string.h>
 
@@ -54,15 +53,12 @@ typedef struct
     bool     drawn;
 } bar_cache_t;
 
-static text_cache_t s_tt[6];            /* telltales */
+static text_cache_t s_tt[5];            /* telltales */
 static text_cache_t s_speed;
-static text_cache_t s_speed_tag;
 static text_cache_t s_val[3];
 static bar_cache_t  s_bar[3];
 static text_cache_t s_info;
 static text_cache_t s_link;
-static info_page_t  s_page;
-static info_page_t  s_drawn_page;
 
 /* Redraw text only when its content or colour changed */
 static void text_widget(text_cache_t *c, uint16_t x, uint16_t y, uint8_t scale,
@@ -107,8 +103,7 @@ static void draw_telltales(const cluster_state_t *st, uint32_t now)
     text_widget(&s_tt[1], 44U,  0U, 2U, "HI",   st->high_beam ? COLOR_BLUE : off);
     text_widget(&s_tt[2], 92U,  0U, 2U, "DOOR", st->door_open ? COLOR_RED : off);
     text_widget(&s_tt[3], 168U, 0U, 2U, "BELT", st->belt_unfastened ? COLOR_RED : off);
-    text_widget(&s_tt[4], 244U, 0U, 2U, "CHK",  (st->dtc_count > 0U) ? COLOR_AMBER : off);
-    text_widget(&s_tt[5], 300U, 0U, 2U, ">",    (st->turn_right && blink_on) ? COLOR_GREEN : off);
+    text_widget(&s_tt[4], 300U, 0U, 2U, ">",    (st->turn_right && blink_on) ? COLOR_GREEN : off);
 }
 
 static void draw_speed(const cluster_state_t *st)
@@ -116,7 +111,7 @@ static void draw_speed(const cluster_state_t *st)
     char buf[8];
     uint16_t color = FG;
 
-    if (st->speed_src == SPEED_SRC_NONE)
+    if (!st->engine_valid)
     {
         (void)strcpy(buf, "---");
         color = COLOR_GREY;
@@ -130,9 +125,6 @@ static void draw_speed(const cluster_state_t *st)
         }
     }
     text_widget(&s_speed, 60U, 40U, 7U, buf, color);
-
-    const char *tag = (st->speed_src == SPEED_SRC_WHEEL) ? "WHEEL" : "     ";
-    text_widget(&s_speed_tag, 236U, 100U, 1U, tag, COLOR_AMBER);
 }
 
 static void draw_gauges(const cluster_state_t *st)
@@ -140,7 +132,7 @@ static void draw_gauges(const cluster_state_t *st)
     char buf[8];
 
     /* RPM */
-    if (st->rpm_valid)
+    if (st->engine_valid)
     {
         (void)log_snprintf(buf, sizeof(buf), "%4u", (unsigned)st->rpm);
         bar_widget(&s_bar[0], ROW_RPM_Y, st->rpm, RPM_MAX, (st->rpm >= RPM_RED) ? COLOR_RED : COLOR_CYAN);
@@ -153,7 +145,7 @@ static void draw_gauges(const cluster_state_t *st)
     text_widget(&s_val[0], VAL_X, ROW_RPM_Y, 2U, buf, FG);
 
     /* Coolant temperature */
-    if (st->coolant_valid)
+    if (st->engine_valid)
     {
         const int32_t c = st->coolant_c;
         const uint32_t above_min = (c > TEMP_MIN_C) ? (uint32_t)(c - TEMP_MIN_C) : 0UL;
@@ -175,61 +167,34 @@ static void draw_gauges(const cluster_state_t *st)
     text_widget(&s_val[2], VAL_X, ROW_FUEL_Y, 2U, buf, ((st->warnings & WARN_LOW_FUEL) != 0U) ? COLOR_AMBER : FG);
 }
 
-static void draw_info(const cluster_state_t *st)
+static void draw_odometer(const cluster_state_t *st)
 {
     char buf[24];
-    can_stats_t cs;
-
-    if (s_page != s_drawn_page)
-    {
-        /* pages differ in length: clear the row so no characters of the old page remain */
-        gfx_fill_rect(0U, 200U, LCD_WIDTH, 16U, BG);
-        s_info.drawn = false;
-        s_drawn_page = s_page;
-    }
-
-    switch (s_page)
-    {
-    case INFO_ODO:
-        (void)log_snprintf(buf, sizeof(buf), "ODO %7lu.%lu km  ",
-                           (unsigned long)(st->odometer_x10 / 10UL), (unsigned long)(st->odometer_x10 % 10UL));
-        break;
-    case INFO_TRIP:
-        (void)log_snprintf(buf, sizeof(buf), "TRIP %5lu.%lu km  ",
-                           (unsigned long)(st->trip_x10 / 10UL), (unsigned long)(st->trip_x10 % 10UL));
-        break;
-    case INFO_CAN:
-        can_get_stats(&cs);
-        (void)log_snprintf(buf, sizeof(buf), "TEC%3u REC%3u %s  ", (unsigned)cs.tec, (unsigned)cs.rec,
-                           cs.bus_off ? "OFF" : (cs.error_passive ? "EP " : "OK "));
-        break;
-    default:
-        (void)log_snprintf(buf, sizeof(buf), "DTC %u  CPU %2u%%    ", (unsigned)st->dtc_count,
-                           (unsigned)sched_cpu_load_pct());
-        break;
-    }
+    (void)log_snprintf(buf, sizeof(buf), "ODO %7lu.%lu km",
+                       (unsigned long)(st->odometer_x10 / 10UL), (unsigned long)(st->odometer_x10 % 10UL));
     text_widget(&s_info, 8U, 200U, 2U, buf, FG);
 }
 
 static void draw_link(const cluster_state_t *st)
 {
     char buf[40];
-    (void)log_snprintf(buf, sizeof(buf), "ENGINE %s   BODY %s",
-                       st->rpm_valid ? "OK  " : "LOST", st->body_valid ? "OK  " : "LOST");
-    text_widget(&s_link, 8U, 228U, 1U, buf, (st->rpm_valid && st->body_valid) ? COLOR_GREY : COLOR_RED);
+    can_stats_t cs;
+
+    can_get_stats(&cs);
+    (void)log_snprintf(buf, sizeof(buf), "ENGINE %s  BODY %s  TEC%3u REC%3u",
+                       st->engine_valid ? "OK  " : "LOST", st->body_valid ? "OK  " : "LOST",
+                       (unsigned)cs.tec, (unsigned)cs.rec);
+    text_widget(&s_link, 8U, 228U, 1U, buf, (st->engine_valid && st->body_valid) ? COLOR_GREY : COLOR_RED);
 }
 
 void dashboard_init(void)
 {
     (void)memset(s_tt, 0, sizeof(s_tt));
     (void)memset(&s_speed, 0, sizeof(s_speed));
-    (void)memset(&s_speed_tag, 0, sizeof(s_speed_tag));
     (void)memset(s_val, 0, sizeof(s_val));
     (void)memset(s_bar, 0, sizeof(s_bar));
     (void)memset(&s_info, 0, sizeof(s_info));
     (void)memset(&s_link, 0, sizeof(s_link));
-    s_page = INFO_ODO;
-    s_drawn_page = INFO_ODO;
 
     gfx_fill_rect(0U, 0U, LCD_WIDTH, LCD_HEIGHT, BG);
     gfx_text(236U, 80U, "km/h", 2U, COLOR_GREY, BG);
@@ -244,11 +209,6 @@ void dashboard_update(const cluster_state_t *st, uint32_t now_ms)
     draw_telltales(st, now_ms);
     draw_speed(st);
     draw_gauges(st);
-    draw_info(st);
+    draw_odometer(st);
     draw_link(st);
-}
-
-void dashboard_next_info_page(void)
-{
-    s_page = (info_page_t)(((uint32_t)s_page + 1UL) % (uint32_t)INFO_COUNT);
 }

@@ -25,10 +25,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
       - name: Build
         run: make -C stm32_cluster -j4
-      - name: MISRA report
+      - name: Static analysis
         run: |
-          pip install cppcheck
-          make -C stm32_cluster misra
+          sudo apt-get install -y cppcheck
+          make -C stm32_cluster check
       - uses: actions/upload-artifact@v4
         with:
           name: stm32-firmware
@@ -36,7 +36,6 @@ jobs:
             stm32_cluster/build/cluster.elf
             stm32_cluster/build/cluster.hex
             stm32_cluster/build/cluster.map
-            stm32_cluster/build/misra.txt
 
   esp32-firmware:
     runs-on: ubuntu-24.04

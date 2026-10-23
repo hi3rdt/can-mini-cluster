@@ -1,21 +1,16 @@
 /**
  * @file    adc.h
- * @brief   ADC1 continuous scan (IN0 fuel pot, IN16 die temperature) into RAM via DMA1_Channel1.
+ * @brief   ADC1 single conversion on PA0 (IN0, fuel level potentiometer), polled.
  */
 #ifndef ADC_H
 #define ADC_H
 
 #include "std_types.h"
 
-typedef enum
-{
-    ADC_CH_FUEL = 0,
-    ADC_CH_TEMP,
-    ADC_CH_COUNT
-} adc_ch_t;
+#define ADC_RAW_MAX     (4095U)     /* 12-bit result */
 
 std_return_t adc_init(void);
-uint16_t     adc_raw(adc_ch_t ch);          /* latest 12-bit sample, no CPU cost */
-int16_t      adc_mcu_temp_x10(void);        /* die temperature in 0.1 degC (+-1.5 degC typ.) */
+/** Start one conversion and wait for it (~21 us). Returns the 12-bit result. */
+uint16_t     adc_read_fuel(void);
 
 #endif /* ADC_H */

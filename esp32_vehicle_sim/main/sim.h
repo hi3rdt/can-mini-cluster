@@ -1,7 +1,7 @@
 /**
  * @file    sim.h
- * @brief   Vehicle model: EngineData (20 ms) / BodyStatus (100 ms) senders, wheel-speed
- *          pulse output and fault injection for HIL-style tests of the cluster.
+ * @brief   Vehicle model: EngineData (20 ms) / BodyStatus (100 ms) senders and fault
+ *          injection for HIL-style tests of the cluster.
  */
 #ifndef SIM_H
 #define SIM_H
@@ -22,10 +22,8 @@ typedef struct
     float      rpm;
     float      coolant_c;
     bool       turn_left, turn_right, high_beam, door_open, belt_unfastened;
-    bool       pulse_enabled;
-    bool       mute_engine, mute_body;  /* stop sending -> cluster timeout DTCs */
-    bool       corrupt_crc;             /* send wrong CRC -> cluster E2E DTC    */
-    float      pulse_offset_kmh;        /* wheel vs CAN mismatch -> plausibility DTC */
+    bool       mute_engine, mute_body;  /* stop sending -> cluster shows "LOST"     */
+    bool       corrupt_crc;             /* wrong CRC -> cluster drops the frames */
 } sim_cfg_t;
 
 void sim_init(void);

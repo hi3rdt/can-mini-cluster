@@ -7,7 +7,8 @@
  * The ESP32 node samples at 85 % (20 tq); see esp32_vehicle_sim/main/can_if.c.
  *
  * Filter bank 0, 16-bit identifier-list mode, accepts exactly:
- * 0x100 EngineData, 0x200 BodyStatus, 0x7E0 diag physical, 0x7DF diag functional.
+ * 0x100 EngineData and 0x200 BodyStatus (each listed twice: a bank holds 4 IDs).
+ * Every other frame is dropped by hardware and never costs CPU time.
  */
 #include "bxcan.h"
 #include "gpio.h"
@@ -69,7 +70,7 @@ std_return_t can_init(can_mode_t mode)
     CAN1->FM1R  |= CAN_FM1R_FBM0;                   /* identifier list */
     CAN1->FFA1R &= ~CAN_FFA1R_FFA0;                 /* -> FIFO0 */
     CAN1->sFilterRegister[0].FR1 = (CAN_STD16(0x200U) << 16) | CAN_STD16(0x100U);
-    CAN1->sFilterRegister[0].FR2 = (CAN_STD16(0x7DFU) << 16) | CAN_STD16(0x7E0U);
+    CAN1->sFilterRegister[0].FR2 = (CAN_STD16(0x200U) << 16) | CAN_STD16(0x100U);
     CAN1->FA1R  |= CAN_FA1R_FACT0;
     CAN1->FMR   &= ~CAN_FMR_FINIT;
 
