@@ -67,13 +67,14 @@ static void log_status(void)
     com_get_stats(&cs);
     can_get_stats(&bs);
     log_printf("t=%lus spd=%u rpm=%u fuel=%u%% eng=%s body=%s | rx %lu/%lu crc_err %lu seq_err %lu "
-               "timeouts %lu/%lu | TEC %u REC %u busoff %lu\r\n",
+               "timeouts %lu/%lu | TEC %u REC %u busoff %lu fifo_ovr %lu q_ovf %lu\r\n",
                (unsigned long)(tick_get() / 1000UL), (unsigned)st->speed_kmh, (unsigned)st->rpm,
                (unsigned)st->fuel_pct, st->engine_valid ? "ok" : "LOST", st->body_valid ? "ok" : "LOST",
                (unsigned long)cs.engine_rx, (unsigned long)cs.body_rx,
                (unsigned long)cs.e2e_crc_errors, (unsigned long)cs.e2e_seq_errors,
                (unsigned long)cs.engine_timeouts, (unsigned long)cs.body_timeouts,
-               (unsigned)bs.tec, (unsigned)bs.rec, (unsigned long)bs.bus_off_events);
+               (unsigned)bs.tec, (unsigned)bs.rec, (unsigned long)bs.bus_off_events,
+               (unsigned long)bs.rx_fifo_overruns, (unsigned long)bs.rx_queue_overflows);
 }
 
 int main(void)
